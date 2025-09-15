@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Sürekli Envanter – FIFO / LIFO / Ağırlıklı Ortalama</title>
+<style>
+  :root{
+    --bg:#f7f7f9; --card:#fff; --ink:#111; --muted:#6b7280; --line:#e5e7eb; --brand:#0f172a; --warn:#b45309;
+    --grid:#cbd5e1; --head:#f3f4f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  .container{max-width:1200px;margin:20px auto;padding:0 16px}
+  h1{font-size:22px;margin:0 0 10px}
+
+  /* toolbar (SABİT ÜSTTE) */
+  .toolbar{
+    position: sticky; top: 0; z-index: 1000;
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    background: rgba(255,255,255,.96);
+    border:1px solid var(--line); border-radius:12px; padding:10px;
+    backdrop-filter: blur(3px); box-shadow: 0 2px 6px rgba(0,0,0,.06);
+  }
+  select,button,input[type="checkbox"]{height:36px}
+  select,button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:0 10px;cursor:pointer}
+  button[disabled],select[disabled]{opacity:.55;cursor:not-allowed}
+  .btn{font-weight:600}
+  .btn.primary{background:var(--brand);color:#fff;border-color:transparent}
+  .btn.warn{background:#fff;border-color:#fbbf24}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:12px;margin-left:6px}
+  .chk{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+
+  /* cards */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .mt12{margin-top:12px}
+  .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+
+  /* Soru alanı */
+  #questionCurrent{
+    font-size:15px;margin:6px 0 0;
+    padding:8px; border:1px dashed var(--line); border-radius:8px;
+  }
+  #questionCurrent.active{
+    background:#FFF1D6;            /* açık turuncu */
+    border-color:#FBBF24;
+  }
+  .qlog{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}
+  .qlog h4{margin:0 0 6px;font-size:13px;color:var(--muted)}
+  .qitem{font-variant-numeric:tabular-nums;border:1px dashed var(--line);border-radius:8px;padding:6px;margin:6px 0;background:#fff}
+  .qitem.active{ background:#FFF1D6; border-color:#FBBF24; }
+
+  /* stok kartı */
+  table{width:100%;border-collapse:separate;border-spacing:0}
+  th,td{padding:6px 8px;font-size:14px;vertical-align:top}
+  thead th{background:var(--head);border-bottom:1px solid var(--line)}
+  tbody tr{border-bottom:1px solid var(--line)}     /* işlem ayıran ince çizgi */
+  .mono{font-variant-numeric:tabular-nums}
+  .right{text-align:right}
+  .sumrow{font-weight:700;background:#fafafa}
+  .gstart{border-left:1px solid var(--grid)}
+  .gend{border-right:1px solid var(--grid)}
+  thead .gstart, thead .gend{border-top:1px solid var(--grid)}
+  .blockTop td{border-top:1px solid var(--grid)}   /* toplamdan önce çizgi */
+
+  /* alt blok – muhasebe + T hesabı */
+  .bottomGrid{display:grid;grid-template-columns:0.55fr 0.45fr;gap:12px}
+
+  /* muhasebe – tek gri başlık satırı */
+  .jwrap{border:1px dashed var(--line);border-radius:10px;padding:8px;margin:8px 0}
+  .jhead{display:grid;grid-template-columns:1fr 1fr 90px 90px;align-items:center;
+         background:var(--head);border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin-bottom:6px}
+  .jhead div{font-weight:700}
+  .jhead .tl{text-align:left}
+  .jhead .tc{text-align:center}
+  .jhead .tr{text-align:right}
+  .jtable{width:100%}
+  .jtable th,.jtable td{padding:4px 6px}
+  .jtable th:nth-child(2), .jtable th:nth-child(3){width:90px}
+  .jtable td:nth-child(2), .jtable td:nth-child(3){text-align:right}
+  .indentCR{display:inline-block;padding-left:5ch}
+
+  /* T hesabı */
+  .ttitle{font-weight:700;text-align:center;margin:6px 0 8px}
+  .tbox{border:2px solid #000}
+  .trow{display:grid;grid-template-columns:1fr 1fr;min-height:26px}
+  .trow > div{padding:6px 8px}
+  .tcolL{border-right:2px solid #000}
+  .thead{font-weight:700;background:var(--head);border-bottom:2px solid #000}
+  .thead .tcolL{border-right:2px solid #000}
+  .tmono{font-variant-numeric:tabular-nums}
+  .tfoot{border-top:2px solid #000}
+  .tbal{border-top:1px solid #000}
+  .tright{text-align:right}
+
+  /* Yazdırma */
+  @media print{
+    @page{ size:A4 portrait; margin:10mm; }
+    body{ background:#fff; }
+    .toolbar{ display:none; }
+    .container{ max-width:100%; }
+    .card{ break-inside:avoid; }
+    h1{ margin-top:0; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Sürekli Envanter – FIFO / LIFO / Ağırlıklı Ortalama</h1>
+
+  <!-- ÜST ARAÇ ÇUBUĞU (sticky) -->
+  <div class="toolbar">
+    <label class="chk"><input type="checkbox" id="inflation"/> Enflasyon var</label>
+
+    <label class="label" for="method">Yöntem Seç</label>
+    <select id="method">
+      <option value="fifo">FIFO (İlk Giren İlk Çıkar)</option>
+      <option value="lifo">LIFO (Son Giren İlk Çıkar)</option>
+      <option value="wa">Ağırlıklı Ortalama (Hareketli)</option>
+    </select>
+
+    <button id="btnIn"  class="btn">Giriş Sorusu</button>
+    <button id="btnOut" class="btn" disabled>Çıkış Sorusu</button>
+    <button id="btnApply" class="btn primary" disabled>Tabloya Aktar</button>
+    <button id="btnReset" class="btn warn">Temizle</button>
+    <button id="btnPrint" class="btn">Yazdır</button>
+
+    <span id="status" class="pill">Hazır</span>
+  </div>
+
+  <!-- SORU -->
+  <div class="card mt12">
+    <div class="label">Soru</div>
+    <p id="questionCurrent" class="mono">Henüz soru yok. “Giriş Sorusu” ile başlayın.</p>
+    <div class="qlog">
+      <h4>Geçmiş Sorular</h4>
+      <div id="questionLog"></div>
+    </div>
+  </div>
+
+  <!-- STOK KARTI -->
+  <div class="card mt12">
+    <div class="label">Hammaddeyi sürekli envanter ve <span id="methodTag">FIFO</span> yöntemi ile stok kartı üzerinde takip ediniz.</div>
+    <table id="stockTable" class="mt12">
+      <thead>
+        <tr>
+          <th style="width:70px">İşlem</th>
+          <th colspan="3" class="gstart gend">Giren (Alış)</th>
+          <th colspan="3" class="gstart gend">Çıkan (Kullanım)</th>
+          <th colspan="3" class="gstart gend">Kalan (Stok)</th>
+        </tr>
+        <tr>
+          <th></th>
+          <th class="right gstart">Miktar</th><th class="right">Fiyat (TL)</th><th class="right gend">Tutar (TL)</th>
+          <th class="right gstart">Miktar</th><th class="right">Fiyat (TL)</th><th class="right gend">Tutar (TL)</th>
+          <th class="right gstart">Miktar</th><th class="right">Fiyat (TL)</th><th class="right gend">Tutar (TL)</th>
+        </tr>
+      </thead>
+      <tbody id="stockBody"></tbody>
+      <tfoot>
+        <tr class="sumrow">
+          <td>Toplam</td>
+          <td class="right mono" id="sumInQty">0</td><td></td><td class="right mono" id="sumInAmt">0,00</td>
+          <td class="right mono" id="sumOutQty">0</td><td></td><td class="right mono" id="sumOutAmt">0,00</td>
+          <td class="right mono" id="sumLeftQty">0</td><td class="right mono" id="sumLeftPrice">0,00</td><td class="right mono" id="sumLeftAmt">0,00</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- ALT BLOK -->
+  <div class="bottomGrid mt12">
+    <div class="card">
+      <div class="label">Muhasebe Kayıtları</div>
+      <div id="entries"></div>
+    </div>
+    <div class="card">
+      <div class="label">T Hesabı</div>
+      <div class="ttitle">150 İLK MADDE VE MALZEME</div>
+      <div class="tbox">
+        <div class="trow thead">
+          <div class="tcolL">BORÇ</div>
+          <div class="tright">ALACAK</div>
+        </div>
+        <div id="tRows"></div>
+        <div class="trow tfoot">
+          <div class="tcolL tmono" id="tDebitSum">toplam: 0,00</div>
+          <div class="tmono tright" id="tCreditSum">toplam: 0,00</div>
+        </div>
+        <div class="trow tbal">
+          <div class="tcolL tmono" id="tBalance">kalan (borç): 0,00</div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- YÖNTEM SONUÇLARI (T hesabının altında) -->
+  <div class="card mt12">
+    <div class="label">Yöntemlere Göre Sonuçlar</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <button id="btnSim" class="btn">Yöntemlere göre sonuçlar</button>
+      <span class="pill">Toplam kullanım maliyetlerini hesaplar</span>
+    </div>
+    <pre id="methodResults" style="margin-top:10px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:14px"></pre>
+  </div>
+</div>
+
+<script>
+/* ========= Yardımcılar ========= */
+const NF2 = new Intl.NumberFormat('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const NFI = new Intl.NumberFormat('tr-TR');
+const el = id=>document.getElementById(id);
+const setText=(id,v)=>el(id).textContent=v;
+
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const fmtNum=n=>NFI.format(n);
+const fmtTL =n=>NF2.format(+n);
+const fmtT  =n=>'T: '+NF2.format(+n);
+const pill  =t=>el('status').textContent=t;
+const enable=(id,on=true)=>el(id).disabled=!on;
+
+// Geçmiş sorulardaki turuncu vurguyu temizle
+function clearQLogHighlights(){
+  document.querySelectorAll('#questionLog .qitem.active')
+    .forEach(n => n.classList.remove('active'));
+}
+
+/* ========= Durum ========= */
+const state={
+  method:'fifo',
+  started:false,
+  op:0,maxOps:10,
+
+  layers:[], stockQty:0, avgPrice:0,
+  sumInQty:0,sumInAmt:0, sumOutQty:0,sumOutAmt:0,
+
+  current:null, journal:[],
+  tRows:[], debitSum:0, creditSum:0,
+
+  inflation:false,
+  lastBuyPrice:null,
+
+  history:[] // {type:'in', qty, price} | {type:'out', qty}
+};
+
+/* ========= Render Ortak ========= */
+function renderMethodTag(){
+  const map={fifo:'FIFO', lifo:'LIFO', wa:'Ağırlıklı Ortalama'};
+  setText('methodTag', map[state.method]);
+}
+function footerRefresh(){
+  const leftAmt = (state.method==='wa')
+    ? state.stockQty*state.avgPrice
+    : state.layers.reduce((s,l)=>s+l.qty*l.price,0);
+  const leftPrice = state.stockQty>0 ? ((state.method==='wa')? state.avgPrice : leftAmt/state.stockQty) : 0;
+
+  setText('sumInQty', fmtNum(state.sumInQty));
+  setText('sumInAmt', fmtTL(state.sumInAmt));
+  setText('sumOutQty', fmtNum(state.sumOutQty));
+  setText('sumOutAmt', fmtTL(state.sumOutAmt));
+  setText('sumLeftQty', fmtNum(state.stockQty));
+  setText('sumLeftPrice', fmtTL(leftPrice));
+  setText('sumLeftAmt', fmtTL(leftAmt));
+}
+function addRow(c){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td class="mono">${c.no??''}</td>
+    <td class="right mono gstart">${c.inQty??''}</td>
+    <td class="right mono">${c.inPrice??''}</td>
+    <td class="right mono gend">${c.inAmt??''}</td>
+    <td class="right mono gstart">${c.outQty??''}</td>
+    <td class="right mono">${c.outPrice??''}</td>
+    <td class="right mono gend">${c.outAmt??''}</td>
+    <td class="right mono gstart">${c.leftQty??''}</td>
+    <td class="right mono">${c.leftPrice??''}</td>
+    <td class="right mono gend">${c.leftAmt??''}</td>`;
+  el('stockBody').appendChild(tr);
+}
+function addBlockTop(){
+  const tr=document.createElement('tr');
+  tr.className='blockTop';
+  tr.innerHTML='<td colspan="10"></td>';
+  el('stockBody').appendChild(tr);
+}
+
+/* ========= Muhasebe & T-Hesabı ========= */
+function renderJournal(entry){
+  const wrap=document.createElement('div');
+  wrap.className='jwrap';
+
+  const head=document.createElement('div');
+  head.className='jhead';
+  head.innerHTML=`
+    <div class="tl">Hesap</div>
+    <div class="tc">${entry.type==='in' ? `Alış (İşlem ${entry.no})` : `Kullanım (İşlem ${entry.no})`}</div>
+    <div class="tr">BORÇ</div>
+    <div class="tr">ALACAK</div>`;
+  wrap.appendChild(head);
+
+  const rows = entry.lines.map(l=>{
+    const isCR = !!l.cr;
+    const name = isCR ? `<span class="indentCR">${l.acc}</span>` : l.acc;
+    const dr = l.dr? fmtTL(l.dr):'';
+    const cr = l.cr? fmtTL(l.cr):'';
+    return `<tr><td>${name}</td><td class="right mono">${dr}</td><td class="right mono">${cr}</td></tr>`;
+  }).join('');
+  wrap.innerHTML += `<table class="jtable"><tbody>${rows}</tbody></table>`;
+  el('entries').appendChild(wrap);
+}
+function pushT(side,no,qty,amt){
+  const row=document.createElement('div');
+  row.className='trow';
+  const left  = side==='B' ? `(${no}) ${fmtNum(qty)} : ${fmtTL(amt)}` : '';
+  const right = side==='A' ? `(${no}) ${fmtNum(qty)} : ${fmtTL(amt)}` : '';
+  row.innerHTML=`<div class="tcolL tmono">${left}</div><div class="tmono tright">${right}</div>`;
+  el('tRows').appendChild(row);
+
+  if(side==='B') state.debitSum += amt; else state.creditSum += amt;
+  setText('tDebitSum', 'toplam: '+fmtTL(state.debitSum));
+  setText('tCreditSum', 'toplam: '+fmtTL(state.creditSum));
+  setText('tBalance', 'kalan (borç): '+fmtTL(state.debitSum - state.creditSum));
+}
+
+/* ========= Maliyet ve Uygulama ========= */
+function applyIn(qty,price){
+  state.sumInQty+=qty; state.sumInAmt+=qty*price;
+  state.stockQty+=qty;
+
+  if(state.method==='wa'){
+    const oldAmt=(state.stockQty-qty)*state.avgPrice;
+    state.avgPrice=(oldAmt + qty*price)/state.stockQty;
+  }else{
+    state.layers.push({qty,price});
+  }
+
+  addRow({no:state.op, inQty:fmtNum(qty), inPrice:fmtTL(price), inAmt:fmtTL(qty*price)});
+  renderKalanBreakdown('');
+
+  const net=qty*price, kdv=net*0.20;
+  renderJournal({no:state.op,type:'in',lines:[
+    {acc:'150. İlk Madde ve Malzeme',dr:net},
+    {acc:'191. İndirilecek KDV',dr:kdv},
+    {acc:'320. Satıcılar',cr:net+kdv}
+  ]});
+  pushT('B', state.op, qty, net);
+
+  state.lastBuyPrice = price;
+  footerRefresh(); addBlockTop();
+}
+function simulateLayersForOut(qty, layers, method, avgPrice){
+  if(method==='wa'){
+    return {used:[{qty,price:avgPrice}], cost:qty*avgPrice, layers, avgPrice};
+  }
+  const copy=layers.map(l=>({...l}));
+  let need=qty, used=[], cost=0;
+  while(need>0 && copy.length){
+    const idx=(method==='fifo')?0:copy.length-1;
+    const l=copy[idx]; const take=Math.min(need,l.qty);
+    used.push({qty:take,price:l.price}); cost+=take*l.price;
+    l.qty-=take; if(l.qty===0) copy.splice(idx,1);
+    need-=take;
+  }
+  return {used,cost,layers:copy,avgPrice};
+}
+function consumeLayers(qty){
+  let need=qty;
+  while(need>0){
+    const idx=(state.method==='fifo')?0:state.layers.length-1;
+    const l=state.layers[idx]; const take=Math.min(need,l.qty);
+    l.qty-=take; if(l.qty===0) state.layers.splice(idx,1);
+    need-=take;
+  }
+}
+function applyOut(qty){
+  qty=Math.min(qty,state.stockQty);
+  const sim=simulateLayersForOut(qty, state.layers, state.method, state.avgPrice);
+  const used=sim.used, cost=sim.cost;
+
+  if(state.method==='wa'){
+    addRow({no:state.op, outQty:fmtNum(qty), outPrice:fmtTL(used[0].price), outAmt:fmtTL(cost)});
+  }else{
+    used.forEach((u,i)=> addRow({no:i===0?state.op:'', outQty:fmtNum(u.qty), outPrice:fmtTL(u.price), outAmt:fmtTL(u.qty*u.price)}));
+    addBlockTop(); addRow({ outQty:fmtNum(qty), outPrice:'', outAmt:fmtT(cost) });
+  }
+
+  state.stockQty-=qty; if(state.method!=='wa'){ consumeLayers(qty); }
+  state.sumOutQty+=qty; state.sumOutAmt+=cost;
+
+  renderKalanBreakdown('');
+  renderJournal({no:state.op,type:'out',lines:[
+    {acc:'710. D. İlk Mad. ve Mlzm. Gideri',dr:cost},
+    {acc:'150. İlk Madde ve Malzeme',cr:cost}
+  ]});
+  pushT('A', state.op, qty, cost);
+
+  footerRefresh(); addBlockTop();
+}
+
+/* Kalanları yaz */
+function renderKalanBreakdown(noLabel){
+  if(state.method==='wa'){
+    addRow({no:noLabel, leftQty:fmtNum(state.stockQty), leftPrice:fmtTL(state.stockQty?state.avgPrice:0), leftAmt:fmtTL(state.stockQty*state.avgPrice)});
+  }else{
+    if(state.layers.length===0){
+      addRow({no:noLabel, leftQty:'0', leftPrice:fmtTL(0), leftAmt:fmtTL(0)});
+    }else{
+      state.layers.forEach((l,i)=> addRow({no:i===0?noLabel:'', leftQty:fmtNum(l.qty), leftPrice:fmtTL(l.price), leftAmt:fmtTL(l.qty*l.price)}));
+      const totalAmt=state.layers.reduce((s,l)=>s+l.qty*l.price,0);
+      addBlockTop(); addRow({ leftQty:fmtNum(state.stockQty), leftPrice:'', leftAmt:fmtT(totalAmt) });
+    }
+  }
+}
+
+/* ========= Soru üretimi ========= */
+function appendQuestionToLog(no,text){
+  const li=document.createElement('div');
+  li.className='qitem';
+  li.textContent=`(${no}) ${text}`;
+  el('questionLog').appendChild(li);
+  return li;
+}
+function makeInQuestion(){
+  if(state.op>=state.maxOps){ alert('Maksimum 10 işleme ulaşıldı.'); return; }
+  const qty=rnd(50,150);
+
+  let price;
+  if(el('inflation').checked && state.lastBuyPrice!==null){
+    const incPct = rnd(5,20)/100;
+    price = Math.round(state.lastBuyPrice*(1+incPct));
+  }else{
+    price = rnd(500,1500);
+  }
+
+  state.current={type:'in',qty,price};
+  const txt=`Satıcıdan, ${fmtNum(qty)} birim hammadde birim fiyatı ${fmtTL(price)} +%20 KDV  bedelle veresiye satın alınmıştır.`;
+  el('questionCurrent').textContent = txt;
+  el('questionCurrent').classList.add('active');  // vurgula
+  clearQLogHighlights();                           // eski vurguları söndür
+  enable('btnApply',true); enable('btnIn',false); enable('btnOut',false);
+  pill('Bekleyen soru: Alış');
+  if(!state.started){ state.started=true; enable('method',false); }
+}
+function makeOutQuestion(){
+  if(state.op>=state.maxOps){ alert('Maksimum 10 işleme ulaşıldı.'); return; }
+  if(state.stockQty<=0){ alert('Stok yok, önce alış yapın.'); return; }
+  let qty=Math.round(state.stockQty*0.70); if(qty<=0 && state.stockQty>0) qty=1; qty=Math.min(qty,state.stockQty);
+  state.current={type:'out',qty};
+  const map={fifo:'FIFO', lifo:'LIFO', wa:'Ağırlıklı Ortalama'};
+  const txt=`Üretimde kullanılmak üzere depodan ${fmtNum(qty)} birim hammadde çekilmiştir. Yöntem: ${map[state.method]}.`;
+  el('questionCurrent').textContent = txt;
+  el('questionCurrent').classList.add('active');  // vurgula
+  clearQLogHighlights();                           // eski vurguları söndür
+  enable('btnApply',true); enable('btnIn',false); enable('btnOut',false);
+  pill('Bekleyen soru: Çıkış');
+}
+function applyQuestion(){
+  if(!state.current) return;
+  const opNo = state.op + 1;
+
+  // soru loguna numaralı ekle ve turuncu yap
+  const itemEl = appendQuestionToLog(opNo, el('questionCurrent').textContent);
+  itemEl.classList.add('active');
+  // üstteki sorunun vurgusunu kapat
+  el('questionCurrent').classList.remove('active');
+
+  // TARİHÇEYE kaydet (yöntemden bağımsız)
+  if(state.current.type==='in') state.history.push({type:'in', qty:state.current.qty, price:state.current.price});
+  else state.history.push({type:'out', qty:state.current.qty});
+
+  state.op++;
+  const q=state.current; state.current=null;
+
+  if(q.type==='in'){ applyIn(q.qty,q.price); pill(`İşlem ${state.op}: Alış uygulandı`); }
+  else{ applyOut(q.qty); pill(`İşlem ${state.op}: Çıkış uygulandı`); }
+
+  el('questionCurrent').textContent='Yeni bir soru için “Giriş Sorusu” veya “Çıkış Sorusu”na tıklayın.';
+  enable('btnApply',false);
+  enable('btnIn', state.op<state.maxOps);
+  enable('btnOut', state.stockQty>0 && state.op<state.maxOps);
+}
+
+/* ========= YÖNTEMLERE GÖRE SONUÇLAR ========= */
+function simulateAll(method){
+  let layers=[]; let avg=0; let stock=0; let totalOut=0;
+
+  for(const op of state.history){
+    if(op.type==='in'){
+      stock += op.qty;
+      if(method==='wa'){
+        const oldAmt=(stock-op.qty)*avg;
+        avg = (oldAmt + op.qty*op.price)/stock;
+      }else{
+        layers.push({qty:op.qty, price:op.price});
+      }
+    }else{ // out
+      let q = Math.min(op.qty, stock);
+      if(method==='wa'){
+        totalOut += q*avg;
+        stock -= q;
+      }else{
+        let need=q;
+        while(need>0 && layers.length){
+          const idx=(method==='fifo')?0:layers.length-1;
+          const l=layers[idx];
+          const take=Math.min(need,l.qty);
+          totalOut += take*l.price;
+          l.qty -= take;
+          if(l.qty===0) layers.splice(idx,1);
+          need -= take;
+        }
+        stock -= q;
+      }
+    }
+  }
+  return totalOut;
+}
+function showMethodResults(){
+  if(state.history.length===0){
+    el('methodResults').textContent = 'Henüz işlem yok.';
+    return;
+  }
+  const fifo = simulateAll('fifo');
+  const lifo = simulateAll('lifo');
+  const wa   = simulateAll('wa');
+
+  el('methodResults').textContent =
+`Kullanım:
+Fifo Yöntemi ile : ${fmtTL(fifo)}
+Lifo Yöntemi ile : ${fmtTL(lifo)}
+Ağırlıklı Ortalama Yöntemi ile : ${fmtTL(wa)}`;
+}
+
+/* ========= Reset & Print ========= */
+function resetAll(){
+  state.method = el('method').value;
+  state.started=false; state.op=0;
+  state.layers=[]; state.stockQty=0; state.avgPrice=0;
+  state.sumInQty=state.sumInAmt=0; state.sumOutQty=state.sumOutAmt=0;
+  state.current=null; state.journal=[]; state.tRows=[]; state.debitSum=0; state.creditSum=0;
+  state.inflation = el('inflation').checked; state.lastBuyPrice=null;
+  state.history=[];
+
+  el('stockBody').innerHTML=''; el('entries').innerHTML='';
+  el('tRows').innerHTML=''; setText('tDebitSum','toplam: 0,00'); setText('tCreditSum','toplam: 0,00'); setText('tBalance','kalan (borç): 0,00');
+  el('questionLog').innerHTML='';
+  el('questionCurrent').textContent='Henüz soru yok. “Giriş Sorusu” ile başlayın.';
+  el('questionCurrent').classList.remove('active');  // vurguyu sıfırla
+  clearQLogHighlights();
+  el('methodResults').textContent='';
+
+  renderMethodTag(); footerRefresh();
+  enable('method',true); enable('btnIn',true); enable('btnOut',false); enable('btnApply',false);
+  pill('Sıfırlandı');
+}
+function doPrint(){ window.print(); }
+
+/* ========= Olaylar ========= */
+el('inflation').addEventListener('change', ()=>{ state.inflation = el('inflation').checked; });
+el('method').addEventListener('change',()=>{ state.method=el('method').value; renderMethodTag(); });
+el('btnIn').addEventListener('click', makeInQuestion);
+el('btnOut').addEventListener('click', makeOutQuestion);
+el('btnApply').addEventListener('click', applyQuestion);
+el('btnReset').addEventListener('click', resetAll);
+el('btnPrint').addEventListener('click', doPrint);
+el('btnSim').addEventListener('click', showMethodResults);
+
+/* ilk kurulum */
+resetAll();
+</script>
+</body>
+</html>
